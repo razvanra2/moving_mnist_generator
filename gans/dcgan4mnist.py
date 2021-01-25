@@ -78,16 +78,14 @@ def generate_and_save_images(model, epoch, test_input):
         plt.axis('off')
 
     plt.savefig('out_figures/image_at_epoch_{:04d}.png'.format(epoch))
+    plt.close(fig)
+
 
 def save_individual_images(model, test_input):
 
     predictions = model(test_input, training=False)
     for i in range(predictions.shape[0]):
-        data = (predictions[i, :, :, 0] * 127.5 + 127.5).numpy()
-
-        img = PIL.Image.fromarray(data, 'L')
-        img.save(f"results/mnist_gan_{i}.jpeg")
-
+        plt.imsave(f"results/mnist_gan_{i}.jpeg", predictions[i, :, :, 0] * 127.5 + 127.5, cmap='gray')
 
 def display_image(epoch_no):
     return PIL.Image.open('out_figures/image_at_epoch_{:04d}.png'.format(epoch_no))
@@ -139,6 +137,7 @@ def train(dataset, epochs):
 
         # Produce images for the GIF as we go
         generate_and_save_images(generator, epoch + 1, seed)
+        save_individual_images(generator, seed)
 
         if (epoch + 1) % 10 == 0:
             checkpoint.save(file_prefix = checkpoint_prefix)
