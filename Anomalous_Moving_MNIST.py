@@ -15,17 +15,13 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial.distance import cdist
 
 class ComplexNumber:
-    def __init__(self, x, y, index, val):
+    def __init__(self, x, y, index):
         self.x = x
         self.y = y
         self.index = index
-        self.val = val
 
     def get_index(self):
         return self.index
-
-    def get_val(self):
-        return self.val
 
 class AnomalousMovingMNIST:
     '''
@@ -44,11 +40,10 @@ class AnomalousMovingMNIST:
                  num_frames=30,
                  original_size=28,
                  nums_per_image=2,
-                 path_data = '',
-                 path_labels = '',
                  path_tSNE = '',
                  n_clusters = 9,
-                 dest='anomovingmnistdata',):
+                 dest='anomovingmnistdata',
+                 path_gan='gans/filtered_results'):
 
         self.shape = shape
         self.num_frames = num_frames
@@ -56,12 +51,11 @@ class AnomalousMovingMNIST:
         self.original_size = original_size
         self.nums_per_image = nums_per_image
         self.dest = dest
-        self.path_data = path_data
-        self.path_labels = path_labels
         self.path_tSNE = path_tSNE
         self.n_clusters = n_clusters
         self.anom_frames = anom_frames
         self.num_anoms_per_frame = num_anoms_per_frame
+        self.path_gan = path_gan
 
     def get_array_from_image(self, im, mean=0, std=1):
         '''
@@ -96,31 +90,20 @@ class AnomalousMovingMNIST:
             ret = ret.reshape(h, w)
         return ret
 
-    #Load dataset from sklearn
-    def load_dataset_from_sklearn(self):
-        data = []
-        labels = []
-        data_reshaped = []
-        try:
-            data = np.load(self.path_data, allow_pickle=True)
-            labels = np.load(self.path_labels, allow_pickle=True)
-            print('Loaded dataset from file system')
-        except:
-            from sklearn.datasets import fetch_openml
-            print("Downloading MNIST dataset from sklearn")
-            data, labels = fetch_openml('mnist_784', version=1, return_X_y=True)
-            data = np.asarray(data)
-            labels = np.asarray(labels)
-            print(data)
-            print(data.shape)
-            print(labels)
-            print(labels.shape)
-            data_reshaped = data.reshape(-1, 1, 28, 28).transpose(0, 1, 3, 2)
-            np.save('data', data)
-            np.save('labels', labels)
-            print(("done"))
+    def read_gan_data(self):
+        images = []
+        for f in os.listdir(self.path_gan):
+            file_path = os.path.join(self.path_gan, f)
 
-        return data[-10000:], data_reshaped[-10000:] / np.float32(255), labels[-10000:]
+            image = Image.open(file_path)
+
+            image_b_w = image.convert('L')
+            images.append(np.asarray(image_b_w))
+
+        images = np.asarray(images).reshape(-1, 28 * 28)
+        images_reshaped = images.reshape(-1, 1, 28, 28).transpose(0, 1, 3, 2)
+
+        return images, images_reshaped
 
     def perform_tSNE(self, data):
         img_embed = None
@@ -135,7 +118,7 @@ class AnomalousMovingMNIST:
             np.save(self.path_tSNE, img_embed)
         return img_embed
 
-    def perform_Birch(self, embedding, labels, n_clusters):
+    def perform_Birch(self, embedding, n_clusters):
         print("Performing Birch. K =",n_clusters)
         clusters_dimension = [0]*n_clusters
         birch = MiniBatchKMeans(n_clusters=n_clusters).fit(embedding)
@@ -145,7 +128,7 @@ class AnomalousMovingMNIST:
         clusters = [ [] for i in range(n_clusters)]
         pos = 0
         for i in birch.labels_:
-                clusters[i].append(ComplexNumber(embedding[pos, 0], embedding[pos, 1], pos, labels[pos]))
+                clusters[i].append(ComplexNumber(embedding[pos, 0], embedding[pos, 1], pos))
                 pos+=1
 
         med = np.argmin(distances, axis=0)
@@ -153,7 +136,7 @@ class AnomalousMovingMNIST:
         for i in range(len(clusters)):
             cluster = clusters[i]
             medoid = med[i]
-            others = [x.get_index() for x in cluster if x.get_val()!=str(labels[medoid])]
+            others = [x.get_index() for x in cluster]
             clusters_others[medoid]=others
 
         return clusters, clusters_others, birch.labels_
@@ -178,10 +161,10 @@ class AnomalousMovingMNIST:
 
         print("Generating dataset of shape ("+str(self.num_sequences)+", "+ str(self.num_frames)+", 1, "+str(self.shape[0])+", "+str(self.shape[1])+")")
 
-        data, mnist, labels = self.load_dataset_from_sklearn()
+        data, mnist = self.read_gan_data()
 
         img_embed = self.perform_tSNE(data)
-        _, med_other, predicted_labels = self.perform_Birch(img_embed, labels, n_clusters=self.n_clusters)
+        _, med_other, predicted_labels = self.perform_Birch(img_embed, n_clusters=self.n_clusters)
         np.save("predicted_labels", predicted_labels)
 
         '''
@@ -222,13 +205,8 @@ class AnomalousMovingMNIST:
             np.random.shuffle(anom_list_med_1)
             np.random.shuffle(anom_list_med_2)
 
-            anom_index_1 = medoids[casual_index[0]]
-            while labels[anom_index_1] == labels[medoids[casual_index[0]]]:
-                anom_index_1 = np.random.choice(anom_list_med_1)
-
-            anom_index_2 = medoids[casual_index[1]]
-            while labels[anom_index_2] == labels[medoids[casual_index[1]]]:
-                anom_index_2 = np.random.choice(anom_list_med_2)
+            anom_index_1 = np.random.choice(anom_list_med_1)
+            anom_index_2 = np.random.choice(anom_list_med_2)
 
             image_false1 = Image.fromarray(self.get_image_from_array(mnist, anom_index_1, mean=0)).resize((original_size, original_size), Image.ANTIALIAS)
             image_false2 = Image.fromarray(self.get_image_from_array(mnist, anom_index_2, mean=0)).resize((original_size, original_size), Image.ANTIALIAS)
@@ -353,8 +331,6 @@ def main():
         num_frames=20,
         num_sequences=200,
         n_clusters=15,
-        path_data='data.npy',
-        path_labels='labels.npy',
         path_tSNE='sne.npy',
         dest='anommnist')
 
